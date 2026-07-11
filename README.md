@@ -9,7 +9,7 @@ A computer vision app that detects objects in real time using **YOLOv8**. Take a
 or upload an image and get instant bounding boxes, class labels, and a running detection
 history — deployed for free with no GPU required.
 
-**🔗 Live demo:** _paste your `https://your-app-name.streamlit.app` link here_
+**🔗 Live demo:** [_paste your `https://your-app-name.streamlit.app` link here_](https://realtime-object-detection-qrytdumkwl36wzrgfjoxwz.streamlit.app/)
 
 ---
 
