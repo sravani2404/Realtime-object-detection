@@ -1,10 +1,10 @@
 streamlit
-ultralytics
-opencv-python-headless
-pandas
-numpy
- 
-# Only needed to run app_live_local.py (continuous webcam version, local use only)
-streamlit-webrtc
-av
-streamlit-autorefresh
+   ultralytics
+   opencv-python-headless
+   pandas
+   numpy
+
+   # Only needed to run app_live_local.py (continuous webcam version, local use only)
+   streamlit-webrtc
+   av
+   streamlit-autorefresh
