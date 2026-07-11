@@ -1,9 +1,9 @@
 streamlit
    ultralytics
-   opencv-python-headless
+   opencv-python-headless==4.10.0.84
+   numpy==1.26.4
    pandas
-   numpy
-
+   
    # Only needed to run app_live_local.py (continuous webcam version, local use only)
    streamlit-webrtc
    av
