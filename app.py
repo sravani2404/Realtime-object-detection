@@ -1,24 +1,34 @@
 """
-Real-Time Object Detection Dashboard (v3)
--------------------------------------------
+Real-Time Object Detection Dashboard (v4 — snapshot edition)
+---------------------------------------------------------------
+Why this version exists: continuous live video (via streamlit-webrtc) requires
+a WebRTC connection, which Streamlit Community Cloud's network is known to
+block without a paid TURN server. Rather than ship a demo link that hangs on
+"Connecting..." for visitors, this version uses st.camera_input — a simple
+"take a photo" button that works over plain HTTPS, no WebRTC required. It
+runs the exact same YOLOv8 model on each captured photo.
+
+The true continuous-video version still works great locally (see the README)
+and that's what the demo GIF shows — this is just what's deployed publicly,
+chosen specifically for reliability.
+
+Run locally:
+    pip install -r requirements.txt
+    streamlit run app.py
 """
 
-import threading
+import hashlib
 import time
-from collections import deque
 
-import av
 import cv2
 import numpy as np
 import pandas as pd
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
-from streamlit_webrtc import RTCConfiguration, VideoProcessorBase, WebRtcMode, webrtc_streamer
 from ultralytics import YOLO
 
-
+# ---------------------------------------------------------------------------
 # Page setup + styling
-
+# ---------------------------------------------------------------------------
 st.set_page_config(page_title="Real-Time Object Detection Dashboard", page_icon="🎯", layout="wide")
 
 st.markdown(
@@ -43,8 +53,8 @@ st.markdown(
     </style>
     <div class="hero">
         <h1>🎯 Real-Time Object Detection Dashboard</h1>
-        <p>Live webcam inference powered by YOLOv8 — streamed to your browser, analyzed in real time.</p>
-        <span class="badge">● Live</span><span class="badge">YOLOv8n</span><span class="badge">80 COCO classes</span>
+        <p>Snapshot-based inference powered by YOLOv8 — take a photo, get instant detections.</p>
+        <span class="badge">YOLOv8n</span><span class="badge">80 COCO classes</span>
     </div>
     """,
     unsafe_allow_html=True,
@@ -58,115 +68,86 @@ def load_model():
 
 model = load_model()
 
-RTC_CONFIGURATION = RTCConfiguration(
-    {
-        "iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {
-                "urls": ["turn:openrelay.metered.ca:80"],
-                "username": "openrelayproject",
-                "credential": "openrelayproject",
-            },
-        ]
-    }
-)
+# ---------------------------------------------------------------------------
+# Session state: safe to use here since everything runs on the main thread
+# (no background WebRTC thread involved in this version)
+# ---------------------------------------------------------------------------
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "last_hash" not in st.session_state:
+    st.session_state.last_hash = None
 
-
-
-# Video processor: this OBJECT is what actually survives between reruns.
-
-class YOLOProcessor(VideoProcessorBase):
-    def __init__(self) -> None:
-        self.conf_threshold = 0.4
-        self.class_filter: list[str] = []
-        self.log: deque = deque(maxlen=300)
-        self.lock = threading.Lock()
-
-    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        img = frame.to_ndarray(format="bgr24")
-        img = cv2.resize(img, (480, 360))  # smaller frame = faster inference, less lag
-
-        results = model.predict(img, conf=self.conf_threshold, verbose=False)[0]
-        annotated = results.plot()
-
-        detected_classes = []
-        for box in results.boxes:
-            cls_name = model.names[int(box.cls[0])]
-            if self.class_filter and cls_name not in self.class_filter:
-                continue
-            detected_classes.append(cls_name)
-
-        with self.lock:
-            self.log.append(
-                {"timestamp": time.time(), "objects": detected_classes, "count": len(detected_classes)}
-            )
-
-        return av.VideoFrame.from_ndarray(annotated, format="bgr24")
-
-
-
+# ---------------------------------------------------------------------------
 # Sidebar controls
-
+# ---------------------------------------------------------------------------
+st.sidebar.header("⚙️ Controls")
 conf_threshold = st.sidebar.slider("Confidence threshold", 0.1, 1.0, 0.4, 0.05)
 class_filter = st.sidebar.multiselect("Filter to specific classes (optional)", list(model.names.values()))
 st.sidebar.markdown("---")
 st.sidebar.caption("Model: YOLOv8n · Classes: 80 (COCO)")
+if st.sidebar.button("🗑️ Clear history"):
+    st.session_state.history = []
+    st.session_state.last_hash = None
+
+
+def run_detection(image_bgr: np.ndarray):
+    results = model.predict(image_bgr, conf=conf_threshold, verbose=False)[0]
+    annotated = results.plot()
+    detected_classes = []
+    for box in results.boxes:
+        cls_name = model.names[int(box.cls[0])]
+        if class_filter and cls_name not in class_filter:
+            continue
+        detected_classes.append(cls_name)
+    return annotated, detected_classes
+
 
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.markdown("### 📷 Live Feed")
-    ctx = webrtc_streamer(
-        key="object-detection",
-        mode=WebRtcMode.SENDRECV,
-        rtc_configuration=RTC_CONFIGURATION,
-        video_processor_factory=YOLOProcessor,
-        media_stream_constraints={"video": True, "audio": False},
-        async_processing=True,
-    )
+    tab1, tab2 = st.tabs(["📷 Take a Photo", "🖼️ Upload an Image"])
 
-# Push the latest sidebar settings into the running processor every rerun
-if ctx.video_processor:
-    ctx.video_processor.conf_threshold = conf_threshold
-    ctx.video_processor.class_filter = class_filter
+    with tab1:
+        camera_file = st.camera_input("Click below to capture a photo")
+        if camera_file is not None:
+            file_bytes = np.asarray(bytearray(camera_file.getvalue()), dtype=np.uint8)
+            img_hash = hashlib.md5(file_bytes).hexdigest()
+            img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            annotated, detected_classes = run_detection(img)
+            st.image(annotated[:, :, ::-1], caption="Detection result", use_container_width=True)
+
+            # Only log a new history entry if this is an actually new capture
+            if img_hash != st.session_state.last_hash:
+                st.session_state.history.append(
+                    {"timestamp": time.time(), "objects": detected_classes, "count": len(detected_classes)}
+                )
+                st.session_state.last_hash = img_hash
+
+    with tab2:
+        uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+        if uploaded_file is not None:
+            file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+            img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            annotated, detected_classes = run_detection(img)
+            st.image(annotated[:, :, ::-1], caption="Detection result", use_container_width=True)
 
 with col2:
-    st.markdown("### 📊 Live Analytics")
-    st_autorefresh(interval=1000, key="analytics_refresh")
-
-    if ctx.video_processor:
-        with ctx.video_processor.lock:
-            log_snapshot = list(ctx.video_processor.log)
-    else:
-        log_snapshot = []
-
-    if log_snapshot:
-        df = pd.DataFrame(log_snapshot)
+    st.markdown("### 📊 Detection History")
+    if st.session_state.history:
+        df = pd.DataFrame(st.session_state.history)
         latest_count = df.iloc[-1]["count"]
         avg_count = round(df["count"].mean(), 1)
 
         m1, m2 = st.columns(2)
-        m1.metric("Objects right now", latest_count)
-        m2.metric("Avg per frame", avg_count)
+        m1.metric("Objects in last shot", latest_count)
+        m2.metric("Avg per shot", avg_count)
 
         all_objects = [obj for row in df["objects"] for obj in row]
         if all_objects:
-            st.markdown("**Object frequency**")
+            st.markdown("**Object frequency (this session)**")
             st.bar_chart(pd.Series(all_objects).value_counts())
 
-        st.markdown("**Detections per frame (recent history)**")
-        st.line_chart(df.set_index("timestamp")["count"])
+        st.markdown("**Objects per snapshot over time**")
+        st.line_chart(df.reset_index()["count"])
     else:
-        st.info("Start the webcam on the left — analytics will appear here within a second or two.")
-
-st.markdown("---")
-st.markdown("### 🖼️ Or test with a single image")
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
-if uploaded_file:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    results = model.predict(img, conf=conf_threshold, verbose=False)[0]
-    annotated = results.plot()
-    st.image(annotated[:, :, ::-1], caption="Detection result", use_container_width=True)
-    if len(results.boxes):
-        st.write(pd.Series([model.names[int(b.cls[0])] for b in results.boxes]).value_counts())
+        st.info("Take a photo or upload an image to see detection history here.")

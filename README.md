@@ -1,77 +1,88 @@
 # 🎯 Real-Time Object Detection Dashboard
 
-![Python](https://img.shields.io/badge/Python-3.10-blue)
+![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![YOLOv8](https://img.shields.io/badge/Model-YOLOv8-orange)
 ![Streamlit](https://img.shields.io/badge/Frontend-Streamlit-red)
-![Deployed](https://img.shields.io/badge/Deployed-HuggingFace%20Spaces-yellow)
+![Deployed](https://img.shields.io/badge/Deployed-Streamlit%20Community%20Cloud-ff4b4b)
 
-A browser-based real-time object detection app. Point your webcam at anything and see
-live bounding boxes, class labels, and a running analytics dashboard (object frequency,
-detections-per-frame trend) — all running on free infrastructure with no GPU required.
+A computer vision app that detects objects in real time using **YOLOv8**. Take a photo
+or upload an image and get instant bounding boxes, class labels, and a running detection
+history — deployed for free with no GPU required.
 
-**🔗 Live demo:** _add your Hugging Face Spaces link here after deployment_
-
-![demo](docs/demo.gif)
-<!-- Record a 5-10s screen capture of the live app and drop it in a /docs folder as demo.gif -->
+**🔗 Live demo:** _paste your `https://your-app-name.streamlit.app` link here_
 
 ---
 
+## Two Versions in This Repo
+
+- **`app.py`** — snapshot-based capture (this is what's deployed live, link above).
+  Uses `st.camera_input` to take a single photo over plain HTTPS. Chosen for the public
+  demo specifically because continuous WebRTC video isn't reliably supported on free
+  hosting without a paid TURN server (see *Architecture Decisions* below).
+- **`app_live_local.py`** — the original continuous live-webcam version, using
+  `streamlit-webrtc`. Fully functional, but only run locally:
+  ```
+  streamlit run app_live_local.py
+  ```
+
 ## Features
 
-- Real-time video inference in-browser via WebRTC (`streamlit-webrtc`)
-- YOLOv8n (nano) model — fast enough to run live on a free CPU instance
-- Adjustable confidence threshold and per-class filtering, live in the sidebar
-- Live analytics panel: object frequency bar chart + detections-per-frame trend line
-- Fallback single-image upload mode (useful if a reviewer's browser blocks webcam access)
+- Real-time YOLOv8 inference on a captured photo or uploaded image
+- Adjustable confidence threshold and per-class filtering in the sidebar
+- Session-long detection history: object frequency chart + detections-per-shot trend
+- Two versions in one repo, so both a reliable public demo and a full live-video build exist
 
 ## Tech Stack
 
-`Python` · `YOLOv8 (Ultralytics)` · `OpenCV` · `Streamlit` · `streamlit-webrtc` · `Pandas`
-
-## Architecture
-
-```
-Browser webcam ──(WebRTC)──> streamlit-webrtc ──> YOLOv8 inference ──> annotated frame ──> back to browser
-                                                        │
-                                                        └──> detection log ──> live charts (Streamlit)
-```
+`Python` · `YOLOv8 (Ultralytics)` · `OpenCV` · `Streamlit` · `streamlit-webrtc` (local version only) · `Pandas`
 
 ## Run Locally
 
 ```bash
 git clone <your-repo-url>
 cd realtime-object-detection
-python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+python3 -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-streamlit run app.py
+streamlit run app.py                # snapshot version
+# or
+streamlit run app_live_local.py     # continuous live-video version
 ```
 
-Open the URL Streamlit prints (usually `http://localhost:8501`), click "Start" on the
-video widget, and allow camera access.
+## Deploy for Free (Streamlit Community Cloud)
 
-## Deploy for Free (Hugging Face Spaces)
+1. Push this repo to GitHub (see commands below).
+2. Go to [share.streamlit.io](https://share.streamlit.io) and log in with GitHub.
+3. Click **"Create app"** → **"Deploy a public app from GitHub"**.
+4. Select this repository, branch `main`, and main file path `app.py`.
+5. Click **"Advanced settings"** and set the Python version to **3.11** (important —
+   newer Python versions can break some of these packages).
+6. Click **Deploy**. First build takes a few minutes.
+7. Note the live URL (`https://your-app-name.streamlit.app`) and add it to the top of
+   this README.
 
-1. Create a free account at [huggingface.co](https://huggingface.co).
-2. Click **New Space** → SDK: **Streamlit** → Hardware: **CPU basic (free)**.
-3. Push this folder's contents to the Space's git repo:
-   ```bash
-   git remote add space https://huggingface.co/spaces/<your-username>/<space-name>
-   git push space main
-   ```
-4. The Space auto-builds using `requirements.txt` and `packages.txt`. First build takes
-   a few minutes (downloading the YOLOv8n weights). After that, it's live at
-   `https://huggingface.co/spaces/<your-username>/<space-name>`.
-5. Put that link at the top of this README and on your resume/LinkedIn.
+**Note:** the free tier spins down after inactivity — the first visit after idle time
+can take 30-60 seconds to wake back up.
+
+## Architecture Decisions
+
+**Why isn't the live version deployed?** `streamlit-webrtc` requires a working WebRTC
+connection between the visitor's browser and the server. Streamlit Community Cloud's
+network is documented (by the `streamlit-webrtc` library itself) to block these
+connections without a paid TURN relay service. Rather than deploy a public demo link
+that hangs on "Connecting..." for visitors, the public version uses `st.camera_input`,
+which works over standard HTTPS with no special networking required. The continuous
+live-video version is kept in the repo for local use, since it's fully functional —
+just not reliably deployable on free infrastructure.
 
 ## What This Demonstrates (for interviews)
 
 - Real-time computer vision inference pipeline, not just batch/offline prediction
-- Trade-off reasoning: chose YOLOv8n over larger variants specifically for free-tier CPU latency
+- Understanding of networking constraints (WebRTC/NAT traversal) affecting deployment choices, and making a deliberate reliability trade-off instead of shipping something fragile
 - End-to-end ownership: model → app → cloud deployment, not just a notebook
 - Basic MLOps: reproducible environment (`requirements.txt`, `packages.txt`), cached model loading
 
 ## Possible Extensions
 
-- Swap in a custom-trained YOLO model (e.g., fine-tuned on a niche class you care about)
+- Swap in a custom-trained YOLO model fine-tuned on a niche class
+- Add a proper paid/self-hosted TURN server to make the live version deployable too
 - Add object tracking (ByteTrack/DeepSORT) for persistent IDs across frames
-- Add a FastAPI backend to serve predictions to multiple frontends
